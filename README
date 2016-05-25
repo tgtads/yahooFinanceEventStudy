@@ -1,0 +1,118 @@
+yahooFinanceEventStudy
+
+github.com/tgtads thomas.geraint.adams@gmail.com
+
+As part of an event study on abnormal returns around quarterly earning surprises, these scripts were designed for:
+- obtaining real data
+- finding a preferred model and regression type for predicting abnormal returns
+- processing data using the preferred model and regression type
+- inspecting the significance and making graphical reports of the processed data
+- simulating data and processing it using the same methodology
+
+Multiple uses of scripts are enabled with the use of arguments.
+
+All scripts should be executed from the root directory of the project.
+
+A specific directory structure is recommended if the scripts below are executed verbatim:
+
+ANALYSIS
+    BEST
+DATA
+    MAIN
+    SIM
+DOCUMENTATION
+    GRAPHS
+    TABLES
+PREPROCESSING
+SCRAPERS
+In recommended order of execution:
+
+OBTAINING, PREPROCESSING DATA ------------------
+
+sh ./SCRAPERS/get_famafrench.sh
+    downloads, extracts, and cleans up the fama-french factors for the three-factor model for predicting stock returns
+    the file goes to DATA/famafrench.csv
+
+Rscript PREPROCESSING/complete_factors.R
+    completes the data in DATA/famafrench.csv by calculating rf, and uses Last Observation Carried Forward to fill in weekends and other non-trading days. Outputs this to DATA/famafrench-cal.csv
+
+sh ./SCRAPERS/get_surprise_profiles.sh
+    scrapes yahoo finance for surprises and the related stock profile
+    data goes to DATA/MAIN/events.csv, DATA/MAIN/profiles.csv and DATA/MAIN/symbol-changes.csv
+    (./SCRAPERS/YFSurpriseSpider/YFSurpriseSpider/spiders specifies the date ranges scraped for)
+    Note: AutoThrottle is enabled to avoid a ban
+
+Rscript PREPROCESSING/merge.R --filter DATA/MAIN/events.csv DATA/MAIN/profiles.csv DATA/MAIN/symbol-changes.csv DATA/MAIN/merged-filtered.csv
+    merges DATA/events.csv, DATA/stocks.csv to DATA/merged.csv, to create a more detailed list of events
+    uses DATA/iso.csv to replace country and bourse identifiers with more formal versions
+    uses DATA/famafrench.csv to find the actual trading day on or following the announcement
+    optionally, --filter to select only events with countries and bourses of interest
+    additionally prints out the suggested start and end dates for pricegrabber.py
+
+python3 SCRAPERS/pricegrabber.py DATA/MAIN/merged-filtered.csv DATA/MAIN/PRICES/ DATA/MAIN/prices-summary.csv -s '2009-12-04' -e '2016-01-06'
+    requests daily closing prices for stocks as defined in merged.csv
+    optionally, requests only prices between dates -s and -e. Otherwise, all historical prices are returned
+    price files are saved to DATA/MAIN/PRICES/ and a summary log is saved
+
+Rscript PREPROCESSING/subset_pricegrabber_survivors.R DATA/MAIN/prices-summary.csv DATA/MAIN/merged-filtered.csv DATA/MAIN/SUBSETS DATA/MAIN/subset-report.csv
+    merges DATA/merged-filtered.csv with DATA/prices-summary.csv
+    identifies surviving events (where there is sufficient price data etc)
+    groups survivors by surprise sign and country, and saves each of these SUBSETS
+    creates a report of the sets in DATA/subset-report.master.csv
+    creates a supergroup of survivors and saves this also
+
+FINDING THE BEST MODEL ------------------
+
+Rscript ANALYSIS/group_returns.R -p ff -m ols -f ANALYSIS/BEST/A.fitstats.ff.ols.csv DATA/MAIN/SUBSETS/A.csv DATA/MAIN/PRICES
+Rscript ANALYSIS/group_returns.R -p mm -m ols -f ANALYSIS/BEST/A.fitstats.mm.ols.csv DATA/MAIN/SUBSETS/A.csv DATA/MAIN/PRICES
+    basic transformation of events and prices to Abnormal Return as a group. either or both returns or fit stats can be returned. The fit stats are useful for comparing the quality of different estimators or models. The significance test results of CAAR, using different types of test, are the final product of this suite.
+
+Rscript ANALYSIS/compare_fits.R ANALYSIS/BEST/A.fitstats.ff.ols.csv ANALYSIS/BEST/A.fitstats.mm.ols.csv ANALYSIS/BEST/A.ff_vs_mm.ols.csv
+    This returns a list of comparisons between specific fit statistics as produced by group-returns.R
+
+Rscript ANALYSIS/group_returns.R -p ff -m ols -f ANALYSIS/BEST/A.fitstats.ff.ols.csv DATA/MAIN/SUBSETS/A.csv DATA/MAIN/PRICES
+Rscript ANALYSIS/group_returns.R -p ff -m fgls -f ANALYSIS/BEST/A.fitstats.ff.fgls.csv DATA/MAIN/SUBSETS/A.csv DATA/MAIN/PRICES
+Rscript ANALYSIS/group_returns.R -p ff -m iwls -f ANALYSIS/BEST/A.fitstats.ff.iwls.csv DATA/MAIN/SUBSETS/A.csv DATA/MAIN/PRICES
+
+Rscript ANALYSIS/compare_fits.R ANALYSIS/BEST/A.fitstats.ff.ols.csv ANALYSIS/BEST/A.fitstats.ff.fgls.csv ANALYSIS/BEST/A.ff.ols_vs_fgls.csv
+Rscript ANALYSIS/compare_fits.R ANALYSIS/BEST/A.fitstats.ff.ols.csv ANALYSIS/BEST/A.fitstats.ff.iwls.csv ANALYSIS/BEST/A.ff.ols_vs_iwls.csv
+Rscript ANALYSIS/compare_fits.R ANALYSIS/BEST/A.fitstats.ff.iwls.csv ANALYSIS/BEST/A.fitstats.ff.fgls.csv ANALYSIS/BEST/A.ff.iwls_vs_fgls.csv
+    Here we can compare between the different estimators while keeping the model constant.
+
+
+ANALYSIS VIA THE BEST MODEL ------------------
+
+Rscript ANALYSIS/group_returns.R -p ff -m iwls -t grank -s DATA/MAIN/STATS/A_CHN-1.sigtests.csv DATA/MAIN/SUBSETS/A_\{CHN,-1\}.csv DATA/MAIN/PRICES
+
+Rscript ANALYSIS/draw-caar.R -v -a -c DATA/MAIN/STATS/A_CHN-1.group-returns.csv DATA/MAIN/STATS/A_CHN-1.CAAR.pdf
+    This returns a pdf of CAAR, Volume or AAR against relative day using the returns as found in group-returns.R
+
+SUMMARY STATISTICS ON DATA ------------------
+
+Rscript ANALYSIS/check-normality.R DATA/famafrench-cal.csv DOCUMENTATION/normstats.csv DOCUMENTATION/normstats.pdf 14
+    This takes any file and produces a csv and a pdf illustrating the summary statistics and normality of the variables in that file. The final argument is the fig number for the items in the pdf.
+
+VISUAL REPORT ON DATA ------------------
+
+PREPROCESSING/draw_population.R
+    R commands, to be executed in the R environment, for making graphical reports on the data used - including events (over time) by country of origin, and events by bourse.
+
+
+SIMULATION ------------------
+
+The final (optional) use of some of these tools would be to follow the Brown-Warner simulation approach, which is to simulate a number of events and process and analyse these in the same way as real events.
+
+sh ./SCRAPERS/get_directory_profiles.sh
+    spiders though lists of firms under an Yahoo Finance industry directory, and scrapes information regarding the firms in question. The data goes to DATA/SIM/directory-profiles.csv
+
+Rscript PREPROCESSING/simulate_events.R
+    creates DATA/SIM/events.csv using DATA/SIM/profiles.csv, DATA/famafrench.csv, and DATA/MAIN/events.csv
+
+Rscript PREPROCESSING/merge.R --filter DATA/SIM/events.csv DATA/SIM/profiles.csv DATA/SIM/symbol-changes.csv DATA/SIM/merged-filtered.csv
+
+python3 SCRAPERS/pricegrabber.py DATA/SIM/merged-filtered.csv DATA/SIM/PRICES/ DATA/SIM/prices-summary.csv -s '2013-12-03' -e '2016-01-08'
+
+Rscript PREPROCESSING/subset_pricegrabber_survivors.R DATA/SIM/prices-summary.csv DATA/SIM/merged-filtered.csv DATA/SIM/SUBSETS DATA/SIM/subset-report.csv
+
+Rscript ANALYSIS/group_returns.R -p ff -m iwls -t grank -s DATA/SIM/STATS/A_CHN-1.sigtests.csv DATA/SIM/SUBSETS/A_\{CHN,-1\}.csv DATA/PRICES
+Rscript ANALYSIS/group_returns.R -p ff -m iwls -t grank -s DATA/SIM/STATS/A_CHN-1.sigtests.csv DATA/SIM/SUBSETS/A_\{CHN,-1\}.csv DATA/PRICES
